@@ -41,6 +41,9 @@ def upload_video():
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
         video_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        # Crie o diretório de uploads caso não exista
+        if not os.path.exists(app.config['UPLOAD_FOLDER']):
+            os.makedirs(app.config['UPLOAD_FOLDER'])
         file.save(video_path)
         return Response(generate(video_path), mimetype='multipart/x-mixed-replace; boundary=frame')
 
