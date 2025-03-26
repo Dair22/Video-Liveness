@@ -1,79 +1,54 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask import Flask, Response, request, render_template
+import cv2
 import os
-import subprocess
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-CORS(app)  # Habilita CORS para todas as origens. Para produção, use configurações específicas.
 
-# Configurações de upload
+# Configuração do diretório de uploads
 UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv'}
-
-# Configurações do Flask
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Função para verificar se o arquivo tem uma extensão permitida
+# Função para verificar se a extensão do arquivo é permitida
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Função para gerar o stream HLS
-def generate_hls_stream(video_path):
-    try:
-        stream_dir = os.path.join('streams', str(os.path.basename(video_path)))
-        if not os.path.exists(stream_dir):
-            os.makedirs(stream_dir)
+# Função para gerar o streaming de vídeo
+def generate(video_path):
+    cap = cv2.VideoCapture(video_path)
+    while True:
+        success, frame = cap.read()
+        if not success:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # Reinicia o vídeo quando terminar
+            continue
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-        # Definindo a URL do stream
-        stream_url = f"/streams/{os.path.basename(video_path)}/index.m3u8"
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-        # Comando FFmpeg para gerar o stream HLS
-        subprocess.run([
-            'ffmpeg', '-i', video_path, '-preset', 'fast', '-g', '50', '-sc_threshold', '0',
-            os.path.join(stream_dir, 'index.m3u8')
-        ], check=True)
-
-        print(f"Stream gerado com sucesso: {stream_url}")
-        return stream_url
-    except subprocess.CalledProcessError as e:
-        print(f"Erro ao executar o FFmpeg: {str(e)}")
-        raise Exception(f"Erro ao gerar o stream: {str(e)}")
-    except Exception as e:
-        print(f"Erro ao gerar o stream: {str(e)}")
-        raise Exception(f"Erro desconhecido: {str(e)}")
-
-# Rota para iniciar o streaming do vídeo
-@app.route('/start-stream', methods=['POST'])
-def start_stream():
+@app.route('/upload', methods=['POST'])
+def upload_video():
     if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    
+        return "No file part", 400
     file = request.files['file']
-    
     if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-
+        return "No selected file", 400
     if file and allowed_file(file.filename):
         filename = secure_filename(file.filename)
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        video_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(video_path)
+        return Response(generate(video_path), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-        try:
-            # Salva o arquivo de vídeo no servidor
-            file.save(file_path)
+@app.route('/video_feed')
+def video_feed():
+    video_path = os.path.join(app.config['UPLOAD_FOLDER'], 'your_video.mp4')  # Caminho do seu vídeo
+    return Response(generate(video_path), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-            # Gera o link para o streaming HLS
-            stream_url = generate_hls_stream(file_path)
-
-            return jsonify({'status': 'streaming', 'streamUrl': stream_url})
-
-        except Exception as e:
-            print(f"Erro ao processar o vídeo: {str(e)}")
-            return jsonify({'error': f'Failed to generate stream: {str(e)}'}), 500
-
-    return jsonify({'error': 'Invalid file format'}), 400
-
-# Inicia o servidor na porta 80
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=80)
 
