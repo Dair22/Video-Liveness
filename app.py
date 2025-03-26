@@ -1,7 +1,8 @@
-from flask import Flask, Response, request, render_template
+from flask import Flask, Response, request, jsonify, render_template
 import cv2
 import os
 from werkzeug.utils import secure_filename
+import tempfile
 
 app = Flask(__name__)
 
@@ -45,11 +46,14 @@ def upload_video():
         if not os.path.exists(app.config['UPLOAD_FOLDER']):
             os.makedirs(app.config['UPLOAD_FOLDER'])
         file.save(video_path)
-        return Response(generate(video_path), mimetype='multipart/x-mixed-replace; boundary=frame')
+        return jsonify({
+            'status': 'streaming',
+            'streamUrl': f"/video_feed/{filename}"
+        })
 
-@app.route('/video_feed')
-def video_feed():
-    video_path = os.path.join(app.config['UPLOAD_FOLDER'], 'your_video.mp4')  # Caminho do seu vídeo
+@app.route('/video_feed/<video_filename>')
+def video_feed(video_filename):
+    video_path = os.path.join(app.config['UPLOAD_FOLDER'], video_filename)
     return Response(generate(video_path), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 if __name__ == '__main__':
